@@ -3,7 +3,7 @@ name: Android Release
 on:
   push:
     branches: [ "master" ]
-  workflow_dispatch: # allow manual trigger
+  workflow_dispatch:
 
 jobs:
   build:
@@ -29,7 +29,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-release
+          name: app-release   # 👈 artifact name must match
           path: app/build/outputs/apk/release/*.apk
 
   release:
@@ -39,7 +39,7 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: app-release
+          name: app-release   # 👈 must be identical to upload step
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
