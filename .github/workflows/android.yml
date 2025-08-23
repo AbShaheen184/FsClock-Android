@@ -29,17 +29,17 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-release   # 👈 artifact name must match
+          name: app-release   # 👈 must match download step
           path: app/build/outputs/apk/release/*.apk
 
   release:
     runs-on: ubuntu-latest
-    needs: build
+    needs: build   # wait until build job is finished
     steps:
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: app-release   # 👈 must be identical to upload step
+          name: app-release   # 👈 same name as upload step
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
