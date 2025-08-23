@@ -13,7 +13,6 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.Point;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.Typeface;
@@ -26,8 +25,6 @@ import android.speech.tts.TextToSpeech;
 import android.text.format.DateFormat;
 import android.util.AttributeSet;
 import android.util.Log;
-import android.util.TypedValue;
-import android.view.Display;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewTreeObserver;
@@ -55,7 +52,7 @@ import java.util.TimerTask;
 
 public class FsClockView extends FrameLayout {
 
-    final static int BURN_IN_PREVENTION_DEVIATION = 15; /*px*/
+    final static int BURN_IN_PREVENTION_DEVIATION = 18; /*px*/
     final static int BURN_IN_PREVENTION_CHANGE = 100000; /*ms*/
     boolean mBurnInPrevention = false;
 
@@ -89,6 +86,7 @@ public class FsClockView extends FrameLayout {
     ImageView mHoursHand;
     Typeface mFontClock;
     Typeface mFontDate;
+    Typeface mFontEvents;
 
     Timer mTimerAnalogClock;
     Timer mTimerCalendarUpdate;
@@ -112,9 +110,6 @@ public class FsClockView extends FrameLayout {
     private void commonInit(Context c) {
         inflate(getContext(), R.layout.view_fsclock, this);
 
-        // init settings
-        mSharedPref = c.getSharedPreferences(SettingsActivity.SHARED_PREF_DOMAIN, Context.MODE_PRIVATE);
-
         // find views
         mRootView = findViewById(R.id.fsclockRootView);
         mMainView = findViewById(R.id.linearLayoutMain);
@@ -136,30 +131,18 @@ public class FsClockView extends FrameLayout {
         mAlarmImage = findViewById(R.id.imageViewAlarm);
         mAlarmImage.setImageResource(R.drawable.ic_alarm_white_24dp);
 
+        // init settings
+        mSharedPref = c.getSharedPreferences(SettingsActivity.SHARED_PREF_DOMAIN, Context.MODE_PRIVATE);
+        loadSettings();
+
+        // instant refresh so that the user does not see "00:00:00"
+        updateEventView();
+        if(!mHighRefreshRate) {
+            updateClock();
+        }
+
         // init layout listener
-        mMainView.getViewTreeObserver().addOnGlobalLayoutListener(
-                new ViewTreeObserver.OnGlobalLayoutListener() {
-                    @Override
-                    public void onGlobalLayout() { // layout has happened here
-                        if(mMainViewDefaultTemp != null && mMainViewDefaultTemp == mMainView.getX()) {
-                            mMainView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
-                            mMainViewDefaultX = mMainView.getX();
-                            mMainViewDefaultY = mMainView.getY();
-                        }
-                        mMainViewDefaultTemp = mMainView.getX();
-                    }
-                });
-        mBottomBar.getViewTreeObserver().addOnGlobalLayoutListener(
-                new ViewTreeObserver.OnGlobalLayoutListener() {
-                    @Override
-                    public void onGlobalLayout() { // layout has happened here
-                        if(mBottomBarDefaultTemp != null && mBottomBarDefaultTemp == mBottomBar.getX()) {
-                            mBottomBar.getViewTreeObserver().removeOnGlobalLayoutListener(this);
-                            mBottomBarDefaultX = mBottomBar.getX();
-                        }
-                        mBottomBarDefaultTemp = mBottomBar.getX();
-                    }
-                });
+        initLayoutListener();
     }
 
     @Override
@@ -186,6 +169,42 @@ public class FsClockView extends FrameLayout {
             mTts.stop();
             mTts.shutdown();
         }
+    }
+
+    private void initLayoutListener() {
+        mMainViewDefaultTemp = null;
+        mBottomBarDefaultTemp = null;
+        if(mMainViewDefaultX != null && mMainViewDefaultY != null) {
+            mMainView.setX(mMainViewDefaultX);
+            mMainView.setY(mMainViewDefaultY);
+        }
+        if(mBottomBarDefaultX != null) {
+            mBottomBar.setX(mBottomBarDefaultX);
+        }
+        mMainView.getViewTreeObserver().addOnGlobalLayoutListener(
+                new ViewTreeObserver.OnGlobalLayoutListener() {
+                    @Override
+                    public void onGlobalLayout() { // layout has happened here
+                        if(mMainViewDefaultTemp != null && mMainViewDefaultTemp == mMainView.getX()) {
+                            mMainView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                            mMainViewDefaultX = mMainView.getX();
+                            mMainViewDefaultY = mMainView.getY();
+                        }
+                        mMainViewDefaultTemp = mMainView.getX();
+                    }
+                });
+        mBottomBar.getViewTreeObserver().addOnGlobalLayoutListener(
+                new ViewTreeObserver.OnGlobalLayoutListener() {
+                    @Override
+                    public void onGlobalLayout() { // layout has happened here
+                        if(mBottomBarDefaultTemp != null && mBottomBarDefaultTemp == mBottomBar.getX()) {
+                            mBottomBar.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                            mBottomBarDefaultX = mBottomBar.getX();
+                            Log.w("POSI", mBottomBar.getX()+"");
+                        }
+                        mBottomBarDefaultTemp = mBottomBar.getX();
+                    }
+                });
     }
 
     static String getDefaultDateFormat(Context c) {
@@ -335,11 +354,6 @@ public class FsClockView extends FrameLayout {
         mTimerCalendarUpdate.schedule(taskCalendarUpdate, 0, 10000);
         mTimerCheckEvent.schedule(taskCheckEvent, 0, 1000);
         mTimerBurnInPreventionRotation.schedule(taskBurnInAvoidRotation, 1000, BURN_IN_PREVENTION_CHANGE);
-
-        // instant refresh so that the user does not see "00:00:00"
-        if(!mHighRefreshRate) {
-            updateClock();
-        }
     }
 
     void loadSettings() {
@@ -428,21 +442,25 @@ public class FsClockView extends FrameLayout {
         // init font
         FontOption fontOptionClock = FontOptions.getById(mSharedPref.getInt("font-digital-clock", FontOptions.DSEG7_CLASSIC));
         mFontClock = ResourcesCompat.getFont(getContext(), fontOptionClock.mResourceId);
+        mDigitalClock.setTypeface(mFontClock, fontOptionClock.mXCorr);
         FontOption fontOptionDate = FontOptions.getById(mSharedPref.getInt("font-digital-date", FontOptions.CAIRO_REGULAR));
         mFontDate = ResourcesCompat.getFont(getContext(), fontOptionDate.mResourceId);
-        mDigitalClock.setTypeface(mFontClock, fontOptionClock.mXCorr);
         mDateText.setTypeface(mFontDate);
+        FontOption fontOptionEvents = FontOptions.getById(mSharedPref.getInt("font-events", FontOptions.CAIRO_REGULAR));
+        mFontEvents = ResourcesCompat.getFont(getContext(), fontOptionEvents.mResourceId);
+        mTextViewEvents.setTypeface(mFontEvents);
 
         // init custom digital color
         int colorDigitalClock = mSharedPref.getInt("color-digital-clock", 0xffffffff);
         int colorDigitalDate = mSharedPref.getInt("color-digital-date", 0xffffffff);
+        int colorEvents = mSharedPref.getInt("color-events", colorDigitalDate);
         mDigitalClock.setColor(colorDigitalClock);
         mDateText.setColor(colorDigitalDate);
-        mTextViewEvents.setTextColor(colorDigitalDate);
-        mBatteryText.setTextColor(colorDigitalDate);
-        mBatteryImage.setColorFilter(colorDigitalDate, PorterDuff.Mode.SRC_ATOP);
-        mAlarmText.setTextColor(colorDigitalDate);
-        mAlarmImage.setColorFilter(colorDigitalDate, PorterDuff.Mode.SRC_ATOP);
+        mTextViewEvents.setTextColor(colorEvents);
+        mBatteryText.setTextColor(colorEvents);
+        mBatteryImage.setColorFilter(colorEvents, PorterDuff.Mode.SRC_ATOP);
+        mAlarmText.setTextColor(colorEvents);
+        mAlarmImage.setColorFilter(colorEvents, PorterDuff.Mode.SRC_ATOP);
 
         // init custom analog color
         if(mSharedPref.getBoolean("own-color-analog-clock-face", false)) {
@@ -722,6 +740,7 @@ public class FsClockView extends FrameLayout {
 
     protected void resume() {
         loadSettings();
+        initLayoutListener();
         startTimer();
     }
 }
